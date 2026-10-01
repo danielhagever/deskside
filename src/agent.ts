@@ -59,9 +59,20 @@ export async function runTurn(
   // fix is in progress, a short answer ("yes", "no, still nothing", "gmail", "continue") belongs to
   // that fix, so it goes straight to answer_troubleshooting instead of back through the model.
   const utterance = history[history.length - 1]?.content ?? "";
-  const active = await env.DB.prepare("SELECT id FROM sessions WHERE ws = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 1")
+  const active = await env.DB.prepare("SELECT id, playbook FROM sessions WHERE ws = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 1")
     .bind(ws)
-    .first<{ id: string }>();
+    .first<{ id: string; playbook: string }>();
+  // Restating the open problem ("the printer is still offline") resumes that fix at the step
+  // where it stopped, which is the behaviour people expect from a human tech.
+  if (active && pickPlaybook(utterance) === active.playbook && !/^(yes|no|yeah|yep|nope)\b/i.test(utterance.trim())) {
+    const r: any = await client.callTool({ name: "start_troubleshooting", arguments: { problem: utterance } });
+    trace.push({ tool: "start_troubleshooting", args: { problem: utterance } });
+    if (!r.isError) {
+      if (r.structuredContent) cards.push({ tool: "start_troubleshooting", ...r.structuredContent });
+      await client.close();
+      return { reply: String(r.structuredContent?.spoken ?? r.content?.[0]?.text ?? ""), cards, trace };
+    }
+  }
   if (active && looksLikeAnswer(utterance)) {
     const r: any = await client.callTool({ name: "answer_troubleshooting", arguments: { answer: utterance, session_id: active.id } });
     trace.push({ tool: "answer_troubleshooting", args: { answer: utterance, session_id: active.id } });
@@ -90,7 +101,11 @@ export async function runTurn(
         { messages, tools: aiTools, max_tokens: 600, ...(round === 0 ? { tool_choice: "required" } : {}) } as any,
       );
       const msg = out?.choices?.[0]?.message ?? { content: out?.response ?? "", tool_calls: out?.tool_calls };
-      const calls: { id: string; name: string; args: any }[] = (msg.tool_calls ?? []).map((c: any, i: number) => ({
+      let rawCalls: any[] = msg.tool_calls ?? [];
+    // Some models write the call as text, e.g. start_troubleshooting(problem="...") or
+    // {"name": "...", "parameters": {...}}. Recover those instead of speaking them aloud.
+    if (!rawCalls.length && typeof msg.content === "string") rawCalls = textualCalls(stripThink(msg.content), tools.map((t) => t.name));
+    const calls: { id: string; name: string; args: any }[] = rawCalls.map((c: any, i: number) => ({
         id: c.id ?? `call_${round}_${i}`,
         name: c.function?.name ?? c.name,
         args: parseArgs(c.function?.arguments ?? c.arguments),
@@ -113,6 +128,8 @@ export async function runTurn(
         let resultText: string;
         try {
           const r: any = await client.callTool({ name: c.name, arguments: c.args });
+          // A failed tool must be reported as failed: otherwise a model happily says "done".
+          if (r.isError) spokenThisTurn.push(`Sorry, that didn't work: ${String(r.content?.[0]?.text ?? "unknown error").replace(/^D1_ERROR:\s*/, "")}`);
           if (r.structuredContent) {
             cards.push({ tool: c.name, ...r.structuredContent });
             if (typeof r.structuredContent.spoken === "string") {
@@ -212,6 +229,24 @@ export function looksLikeAnswer(u: string): boolean {
   )
     return false;
   return words.some((w) => ANSWER_WORDS.includes(w));
+}
+
+export function textualCalls(text: string, names: string[]): { name: string; arguments: any }[] {
+  const t = text.trim();
+  try {
+    const j = JSON.parse(t);
+    const arr = Array.isArray(j) ? j : [j];
+    const out = arr.filter((c) => c && names.includes(c.name)).map((c) => ({ name: c.name, arguments: c.parameters ?? c.arguments ?? {} }));
+    if (out.length) return out;
+  } catch {}
+  const m = t.match(/^\[?\s*([a-z_]+)\s*\(([\s\S]*)\)\s*\]?$/);
+  if (!m || !names.includes(m[1])) return [];
+  const args: Record<string, unknown> = {};
+  for (const a of m[2].matchAll(/([a-z_]+)\s*=\s*("([^"]*)"|'([^']*)'|[^,\s)]+)/g)) {
+    const v = a[3] ?? a[4] ?? a[2];
+    args[a[1]] = /^-?\d+$/.test(v) ? Number(v) : v;
+  }
+  return [{ name: m[1], arguments: args }];
 }
 
 function parseArgs(a: unknown): any {

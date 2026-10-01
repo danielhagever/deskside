@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS tickets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ws TEXT NOT NULL,
+  num INTEGER,                                   -- ticket number as people hear it, counted per workspace
   status TEXT NOT NULL DEFAULT 'open',          -- open | waiting | resolved | closed
   priority TEXT NOT NULL DEFAULT 'normal',      -- low | normal | high | urgent
   summary TEXT NOT NULL,
@@ -14,6 +15,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS tickets_ws ON tickets(ws, status);
+CREATE INDEX IF NOT EXISTS tickets_ws_num ON tickets(ws, num);
 
 CREATE TABLE IF NOT EXISTS devices (
   ws TEXT NOT NULL,

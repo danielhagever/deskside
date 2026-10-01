@@ -100,20 +100,20 @@ export default {
     for (const t of watched) {
       const st = t.watch_service ? statuses.get(t.watch_service) : undefined;
       if (st && st.health === "operational" && t.watch_since_status && t.watch_since_status !== "operational") {
-        await db.updateTicket(env, t.ws, t.id, {
+        await db.updateTicket(env, t.ws, t.num ?? t.id, {
           status: "resolved",
           note: `${st.name} reports it is working again (checked ${nowIso}). Try again; close the ticket if it works.`,
           watch_service: null,
           watch_since_status: "operational",
         });
-        await db.addEvent(env, t.ws, "watch", `${st.name} is working again, so ticket ${t.id} is marked resolved.`);
+        await db.addEvent(env, t.ws, "watch", `${st.name} is working again, so ticket ${t.num ?? t.id} is marked resolved.`);
       } else if (st && st.health !== t.watch_since_status && st.health !== "unknown") {
-        await db.updateTicket(env, t.ws, t.id, { note: `${st.name} status changed to ${st.health}`, watch_since_status: st.health });
+        await db.updateTicket(env, t.ws, t.num ?? t.id, { note: `${st.name} status changed to ${st.health}`, watch_since_status: st.health });
       }
       if (t.followup_at && t.followup_at <= nowIso) {
         const note = st ? `Follow-up: ${st.name} is ${st.health}.` : "Follow-up time reached: ask whether the problem is still happening.";
-        await db.updateTicket(env, t.ws, t.id, { note, followup_at: null });
-        await db.addEvent(env, t.ws, "followup", `Ticket ${t.id} follow-up: ${note}`);
+        await db.updateTicket(env, t.ws, t.num ?? t.id, { note, followup_at: null });
+        await db.addEvent(env, t.ws, "followup", `Ticket ${t.num ?? t.id} follow-up: ${note}`);
       }
     }
   },

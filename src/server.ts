@@ -131,7 +131,8 @@ export function buildServer(env: Env, wsRaw: string): McpServer {
         session_id: z.string().optional().describe("Session id from start_troubleshooting; omit to use the most recent active session"),
       }),
     },
-    async ({ answer, session_id }) => {
+    async ({ answer, session_id: sid }) => {
+      const session_id = sid && !/^(null|undefined|none)?$/i.test(sid.trim()) ? sid : undefined;
       const s = session_id
         ? await env.DB.prepare("SELECT * FROM sessions WHERE ws = ? AND id = ?").bind(ws, session_id).first<any>()
         : await env.DB.prepare("SELECT * FROM sessions WHERE ws = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 1")

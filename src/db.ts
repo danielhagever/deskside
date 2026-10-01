@@ -8,6 +8,7 @@ export interface Env {
 
 export interface Ticket {
   id: number;
+  row_id?: number;
   ws: string;
   status: string;
   priority: string;
@@ -32,8 +33,10 @@ export function cleanWs(ws: string | null | undefined): string {
   return v || "demo";
 }
 
+// People hear per-workspace ticket numbers ("ticket 2"), so `id` is the workspace number and
+// `row_id` is the database key.
 function rowToTicket(r: any): Ticket {
-  return { ...r, history: JSON.parse(r.history || "[]") };
+  return { ...r, id: r.num ?? r.id, row_id: r.id, history: JSON.parse(r.history || "[]") };
 }
 
 export async function createTicket(
@@ -53,10 +56,11 @@ export async function createTicket(
   const at = now();
   const history = JSON.stringify([{ at, text: "Ticket opened" }]);
   const r = await env.DB.prepare(
-    `INSERT INTO tickets (ws, status, priority, summary, details, device, watch_service, watch_since_status, history, created_at, updated_at)
-     VALUES (?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO tickets (ws, num, status, priority, summary, details, device, watch_service, watch_since_status, history, created_at, updated_at)
+     VALUES (?, (SELECT COALESCE(MAX(num), 0) + 1 FROM tickets WHERE ws = ?), 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   )
     .bind(
+      ws,
       ws,
       t.priority ?? "normal",
       t.summary.slice(0, 200),
@@ -69,19 +73,19 @@ export async function createTicket(
       at,
     )
     .first();
-  await addEvent(env, ws, "ticket", `Ticket #${(r as any).id} opened: ${t.summary}`);
+  await addEvent(env, ws, "ticket", `Ticket #${(r as any).num} opened: ${t.summary}`);
   return rowToTicket(r);
 }
 
 export async function getTicket(env: Env, ws: string, id: number): Promise<Ticket | null> {
-  const r = await env.DB.prepare("SELECT * FROM tickets WHERE ws = ? AND id = ?").bind(ws, id).first();
+  const r = await env.DB.prepare("SELECT * FROM tickets WHERE ws = ? AND num = ?").bind(ws, id).first();
   return r ? rowToTicket(r) : null;
 }
 
 export async function listTickets(env: Env, ws: string, status?: string): Promise<Ticket[]> {
   const q = status
-    ? env.DB.prepare("SELECT * FROM tickets WHERE ws = ? AND status = ? ORDER BY id DESC LIMIT 50").bind(ws, status)
-    : env.DB.prepare("SELECT * FROM tickets WHERE ws = ? AND status IN ('open','waiting','resolved') ORDER BY id DESC LIMIT 50").bind(ws);
+    ? env.DB.prepare("SELECT * FROM tickets WHERE ws = ? AND status = ? ORDER BY num DESC LIMIT 50").bind(ws, status)
+    : env.DB.prepare("SELECT * FROM tickets WHERE ws = ? AND status IN ('open','waiting','resolved') ORDER BY num DESC LIMIT 50").bind(ws);
   const { results } = await q.all();
   return results.map(rowToTicket);
 }
@@ -115,7 +119,7 @@ export async function updateTicket(
   };
   const r = await env.DB.prepare(
     `UPDATE tickets SET status = ?, priority = ?, followup_at = ?, watch_service = ?, watch_since_status = ?, history = ?, updated_at = ?
-     WHERE ws = ? AND id = ? RETURNING *`,
+     WHERE ws = ? AND num = ? RETURNING *`,
   )
     .bind(
       next.status,
