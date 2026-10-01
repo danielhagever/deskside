@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deskside board</title>
+<style>
+  :root { --bg:#0f1720; --card:#16212d; --ink:#e8eef5; --mute:#8fa3b8; --ok:#3ecf8e; --warn:#f5b84b; --bad:#ff6b6b; --accent:#38bdf8; }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); padding: 14px; }
+  h2 { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--mute); margin: 14px 0 8px; }
+  .row { display:flex; gap:8px; flex-wrap: wrap; }
+  .svc { background: var(--card); border-radius: 10px; padding: 8px 10px; min-width: 140px; flex: 1; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align: 1px; }
+  .operational .dot { background: var(--ok); } .degraded .dot, .maintenance .dot { background: var(--warn); } .outage .dot { background: var(--bad); } .unknown .dot { background: var(--mute); }
+  .t { background: var(--card); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; border-left: 3px solid var(--accent); }
+  .t.high, .t.urgent { border-left-color: var(--bad); }
+  .meta { color: var(--mute); font-size: 12px; }
+  button { background: #22364a; color: var(--ink); border: 0; border-radius: 7px; padding: 5px 10px; font: inherit; cursor: pointer; margin-top: 6px; }
+  button:hover { background: #2b4560; }
+  .empty { color: var(--mute); }
+  .say { background: #102a3a; border-radius: 10px; padding: 10px 12px; }
+</style>
+</head>
+<body>
+<div id="say" class="say" hidden></div>
+<h2>Services you rely on</h2>
+<div id="services" class="row"><span class="empty">Waiting for data…</span></div>
+<h2>Open tickets</h2>
+<div id="tickets"><span class="empty">Waiting for data…</span></div>
+<script type="module">
+/*__APP_BUNDLE__*/
+</script>
+<script type="module">
+const { App } = window.McpApps;
+const app = new App({ name: "Deskside board", version: "0.1.0" }, {});
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function render(data) {
+  if (!data) return;
+  if (data.spoken) { $("say").hidden = false; $("say").textContent = data.spoken; }
+  const services = data.outages ?? data.services ?? [];
+  $("services").innerHTML = services.length
+    ? services.map((s) => `<div class="svc ${esc(s.health)}"><span class="dot"></span><b>${esc(s.name)}</b><div class="meta">${esc(s.incidents?.[0]?.title || s.summary || s.health)}</div></div>`).join("")
+    : `<span class="empty">No services checked yet.</span>`;
+  const tickets = data.tickets ?? (data.ticket ? [data.ticket] : []);
+  $("tickets").innerHTML = tickets.length
+    ? tickets.map((t) => `<div class="t ${esc(t.priority)}"><b>#${t.id} ${esc(t.summary)}</b>
+        <div class="meta">${esc(t.status)} · ${esc(t.priority)}${t.device ? " · " + esc(t.device) : ""}${t.watch_service ? " · watching " + esc(t.watch_service) : ""}</div>
+        <div class="meta">${esc(t.history?.[t.history.length - 1]?.text ?? "")}</div>
+        ${t.status !== "closed" ? `<button data-close="${t.id}">Mark fixed</button>` : ""}</div>`).join("")
+    : `<span class="empty">No open tickets. Nice.</span>`;
+}
+
+document.addEventListener("click", async (e) => {
+  const id = e.target?.dataset?.close;
+  if (!id) return;
+  e.target.disabled = true;
+  const res = await app.callServerTool({ name: "update_ticket", arguments: { ticket_id: Number(id), status: "closed", note: "Closed from the Deskside board" } });
+  render(res.structuredContent);
+});
+
+app.ontoolresult = (params) => render(params.structuredContent);
+await app.connect();
+</script>
+</body>
+</html>

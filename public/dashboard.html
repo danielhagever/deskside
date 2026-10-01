@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deskside IT Board</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#0b1016; --panel:#121a23; --ink:#eef3f8; --mute:#8ea2b6; --line:#223040; --cyan:#31c4f3; --bad:#ff6b6b; --ok:#3ecf8e; --warn:#f5b84b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 Inter, system-ui, sans-serif; }
+  .wrap { max-width:1180px; margin:0 auto; padding:22px 16px 40px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--mute); margin:0 0 18px; }
+  .grid { display:grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); gap:18px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; }
+  h3 { margin:0 0 10px; font-size:12px; letter-spacing:.07em; text-transform:uppercase; color:var(--mute); }
+  .t { border:1px solid var(--line); border-left:3px solid var(--cyan); border-radius:10px; padding:10px 12px; margin-bottom:10px; }
+  .t.high, .t.urgent { border-left-color: var(--bad); }
+  .t.resolved { border-left-color: var(--ok); }
+  .m { color:var(--mute); font-size:12px; }
+  details summary { cursor:pointer; color:var(--cyan); font-size:12px; margin-top:6px; }
+  ol { margin:6px 0 0 18px; padding:0; color:#c6d6e6; font-size:13px; }
+  .ev { padding:6px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .ev:last-child { border-bottom:0; }
+  .pill { display:inline-block; font-size:11px; padding:1px 8px; border-radius:999px; background:#1d2a38; color:#cfe2f3; margin-right:6px; }
+  a { color:var(--cyan); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>IT Board</h1>
+  <p class="sub">What the household's tech person sees: every ticket Alexa+ opened, the steps already tried, and what the background watcher noticed. Workspace <b id="ws"></b> · <a id="back" href="/">back to the Echo Show</a></p>
+  <div class="grid">
+    <section><h3>Tickets</h3><div id="tickets" class="m">Loading…</div></section>
+    <div>
+      <section style="margin-bottom:18px"><h3>Timeline</h3><div id="events" class="m">Loading…</div></section>
+      <section><h3>Known devices</h3><div id="devices" class="m">Loading…</div></section>
+    </div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let ws = new URLSearchParams(location.search).get("ws");
+try { ws = ws || localStorage.getItem("deskside-ws"); } catch {}
+ws = ws || "demo";
+$("ws").textContent = ws; $("back").href = `/?ws=${ws}`;
+const when = (iso) => new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+async function load() {
+  const s = await (await fetch(`/api/state?ws=${encodeURIComponent(ws)}`)).json();
+  $("tickets").innerHTML = s.tickets.length ? s.tickets.map((t) => `
+    <div class="t ${esc(t.priority)} ${esc(t.status)}">
+      <b>#${t.id} ${esc(t.summary)}</b>
+      <div class="m"><span class="pill">${esc(t.status)}</span><span class="pill">${esc(t.priority)}</span>${t.device ? `<span class="pill">${esc(t.device)}</span>` : ""}${t.watch_service ? `<span class="pill">watching ${esc(t.watch_service)}</span>` : ""} opened ${when(t.created_at)}</div>
+      ${t.details ? `<details><summary>Steps already tried</summary><ol>${esc(t.details).split("\n").filter((l) => /^\d+\./.test(l)).map((l) => `<li>${l.replace(/^\d+\.\s*/, "")}</li>`).join("") || `<li>${esc(t.details)}</li>`}</ol></details>` : ""}
+      <details><summary>History</summary><ol>${t.history.map((h) => `<li>${when(h.at)}: ${esc(h.text)}</li>`).join("")}</ol></details>
+    </div>`).join("") : "No open tickets.";
+  $("events").innerHTML = s.events.length ? s.events.map((e) => `<div class="ev"><span class="pill">${esc(e.kind)}</span>${esc(e.text)}<div class="m">${when(e.at)}</div></div>`).join("") : "Nothing yet.";
+  $("devices").innerHTML = s.devices.length ? s.devices.map((d) => `<div class="ev"><b>${esc(d.name)}</b> <span class="m">${esc(d.kind)} ${esc(d.model)}</span>${d.notes ? `<div class="m">${esc(d.notes)}</div>` : ""}</div>`).join("") : "None remembered yet.";
+}
+load(); setInterval(load, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "name": "deskside",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:ui": "node scripts/build-ui.mjs && esbuild hostsrc/apps-host.ts --bundle --format=esm --minify --outfile=public/apps-host.js",
+    "dev": "wrangler dev",
+    "deploy": "npm run build:ui && wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test:convo": "python3 test/convo.py"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.103.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "^2.2.0",
+    "@modelcontextprotocol/ext-apps": "^2.0.3",
+    "@modelcontextprotocol/server": "^2.2.0",
+    "zod": "^4.6.5"
+  },
+  "description": "Deskside: a voice-first IT help desk for Alexa+, as an MCP server (Streamable HTTP, MCP Apps, Agent Skill).",
+  "license": "MIT"
+}
