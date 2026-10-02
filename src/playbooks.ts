@@ -131,7 +131,7 @@ export const PLAYBOOKS: Record<string, Playbook> = {
         answers: YES_NO("done", "escalate"),
       },
       signin: {
-        say: "Use the official password reset page for your email provider, never a link from an email. If you're locked out of the reset too, I'll open a ticket.",
+        say: "Use the official password reset page for your email provider, never a link from an email. Did that get you back in?",
         answers: YES_NO("done", "escalate"),
       },
       escalate: {

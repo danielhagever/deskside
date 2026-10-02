@@ -1,4 +1,5 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
+import { speech } from "./tts";
 import type { Env } from "./db";
 import * as db from "./db";
 import { buildServer } from "./server";
@@ -23,6 +24,11 @@ export default {
     const url = new URL(req.url);
 
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return mcp(env, req);
+
+    if (url.pathname === "/api/tts" && req.method === "POST") {
+      const body = (await req.json().catch(() => null)) as { text?: string } | null;
+      return speech(env, body?.text ?? "", req.headers.get("x-test-voice"));
+    }
 
     if (url.pathname === "/api/chat" && req.method === "POST") {
       const body = (await req.json().catch(() => null)) as {
@@ -85,36 +91,59 @@ export default {
   // The watcher: every ten minutes, re-read the status of every service a ticket is watching,
   // note recoveries on the ticket, and run scheduled follow-ups. This is what lets Deskside say
   // "while you were away, Zoom came back" in the next conversation.
+  // Free plan: at most 50 outbound calls per run. One read, one status fetch per distinct service
+  // (15 at most), and all writes in D1 batches keep it near 20 whatever the number of tickets.
   async scheduled(_event: ScheduledController, env: Env, _ctx: ExecutionContext) {
     const nowIso = db.now();
     const { results: watched } = await env.DB.prepare(
-      "SELECT * FROM tickets WHERE status IN ('open','waiting') AND (watch_service IS NOT NULL OR (followup_at IS NOT NULL AND followup_at <= ?)) LIMIT 200",
+      "SELECT * FROM tickets WHERE status IN ('open','waiting') AND (watch_service IS NOT NULL OR (followup_at IS NOT NULL AND followup_at <= ?)) ORDER BY updated_at LIMIT 300",
     )
       .bind(nowIso)
       .all<any>();
     if (!watched.length) return;
     const keys = [...new Set(watched.map((t) => t.watch_service).filter((k): k is string => !!k && !!SERVICES[k]))];
     const statuses = new Map<string, ServiceStatus>();
-    for (const k of keys) statuses.set(k, await checkService(k));
+    await Promise.all(keys.map(async (k) => statuses.set(k, await checkService(k))));
 
+    const writes: D1PreparedStatement[] = [];
+    const event = (ws: string, kind: string, text: string) => writes.push(env.DB.prepare("INSERT INTO events (ws, at, kind, text) VALUES (?, ?, ?, ?)").bind(ws, nowIso, kind, text.slice(0, 500)));
     for (const t of watched) {
-      const st = t.watch_service ? statuses.get(t.watch_service) : undefined;
-      if (st && st.health === "operational" && t.watch_since_status && t.watch_since_status !== "operational") {
-        await db.updateTicket(env, t.ws, t.num ?? t.id, {
-          status: "resolved",
-          note: `${st.name} reports it is working again (checked ${nowIso}). Try again; close the ticket if it works.`,
-          watch_service: null,
-          watch_since_status: "operational",
-        });
-        await db.addEvent(env, t.ws, "watch", `${st.name} is working again, so ticket ${t.num ?? t.id} is marked resolved.`);
-      } else if (st && st.health !== t.watch_since_status && st.health !== "unknown") {
-        await db.updateTicket(env, t.ws, t.num ?? t.id, { note: `${st.name} status changed to ${st.health}`, watch_since_status: st.health });
+      const num = t.num ?? t.id;
+      const history: { at: string; text: string }[] = JSON.parse(t.history || "[]");
+      let status = t.status;
+      let watch = t.watch_service;
+      let since = t.watch_since_status;
+      let followup = t.followup_at;
+      let changed = false;
+      const st = watch ? statuses.get(watch) : undefined;
+      if (st && st.health === "operational" && since && since !== "operational") {
+        history.push({ at: nowIso, text: `Status ${status} -> resolved` }, { at: nowIso, text: `${st.name} reports it is working again (checked ${nowIso}). Try again; close the ticket if it works.` });
+        status = "resolved";
+        watch = null;
+        since = "operational";
+        changed = true;
+        event(t.ws, "watch", `${st.name} is working again, so ticket ${num} is marked resolved.`);
+      } else if (st && st.health !== since && st.health !== "unknown") {
+        history.push({ at: nowIso, text: `${st.name} status changed to ${st.health}` });
+        since = st.health;
+        changed = true;
       }
-      if (t.followup_at && t.followup_at <= nowIso) {
+      if (followup && followup <= nowIso) {
         const note = st ? `Follow-up: ${st.name} is ${st.health}.` : "Follow-up time reached: ask whether the problem is still happening.";
-        await db.updateTicket(env, t.ws, t.num ?? t.id, { note, followup_at: null });
-        await db.addEvent(env, t.ws, "followup", `Ticket ${t.num ?? t.id} follow-up: ${note}`);
+        history.push({ at: nowIso, text: note });
+        followup = null;
+        changed = true;
+        event(t.ws, "followup", `Ticket ${num} follow-up: ${note}`);
+      }
+      if (changed) {
+        writes.push(
+          env.DB.prepare("UPDATE tickets SET status = ?, watch_service = ?, watch_since_status = ?, followup_at = ?, history = ?, updated_at = ? WHERE id = ?").bind(
+            status, watch, since, followup, JSON.stringify(history.slice(-60)), nowIso, t.id,
+          ),
+        );
       }
     }
+    for (let i = 0; i < writes.length; i += 80) await env.DB.batch(writes.slice(i, i + 80));
+    console.log(`watched ${watched.length} tickets across ${keys.length} services, ${writes.length} writes`);
   },
 };
