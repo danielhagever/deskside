@@ -2,6 +2,7 @@
 
 **The help desk tech you can talk to.** Deskside is an MCP server that gives Alexa+ the skills of a patient home and small-office IT person: it checks whether an online service is down before blaming your laptop, walks you through a fix one spoken step at a time, remembers where you stopped (even days later), opens a ticket with every step already tried, and keeps watching an outage in the background so the next conversation starts with *"while you were away, Zoom came back."*
 
+- **Demo video (2.5 min):** https://youtu.be/D6WFENVsa1U
 - **Live demo (simulated Echo Show, voice in and out):** https://deskside.meshulam791.workers.dev
 - **MCP endpoint (Streamable HTTP):** `https://deskside.meshulam791.workers.dev/mcp?ws=<your-workspace>`
 - **IT board (what the household's tech person sees):** https://deskside.meshulam791.workers.dev/dashboard.html
@@ -71,6 +72,10 @@ public/             Echo Show simulator, IT board, MCP Apps preview host
 skills/             Agent Skill
 schema.sql          D1 schema
 ```
+
+## Open-source extra
+
+The status adapters are also published as a standalone, dependency-free library with tests on real feed captures: [status-feeds](https://github.com/danielhagever/status-feeds).
 
 ## License
 
